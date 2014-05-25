@@ -1,0 +1,169 @@
+package com.softsquare.side;
+
+import java.io.FileNotFoundException;
+import java.io.PrintWriter;
+import java.util.ArrayList;
+
+import com.badlogic.gdx.Files.FileType;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input.Keys;
+import com.badlogic.gdx.InputProcessor;
+import com.badlogic.gdx.files.FileHandle;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer.ShapeType;
+import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.physics.box2d.Body;
+import com.badlogic.gdx.physics.box2d.World;
+
+public class Level implements InputProcessor {
+	public SideGame game;
+	public Camera camera;
+	public World world;
+	public Terrain terrain;
+	public Fluid fluid;
+	public Fluid2 fluid2;
+	public Vector2 cameraOrigin = new Vector2();
+	public boolean cameraChase = true;
+	public int levelId;
+
+	public Level(SideGame game, int id, Camera camera) {
+		this.game = game;
+		this.levelId = id;
+		this.camera = camera;
+		InputManager.add(this);
+	}
+
+	public void generate() {
+		world = new World(new Vector2(0, -5 * Globals.gravity.get().floatValue()), false);
+		terrain = new Terrain(world, this);
+
+		terrain.generate();
+		//terrain.saveCurrentTerrain();
+		//terrain.loadCurrentTerrain();
+		terrain.reload(terrain.terrainMap);
+
+		// fluid = new Fluid(world, camera);
+		fluid2 = new Fluid2(game, world, camera);
+	}
+
+	public void update(float deltaTime) {
+		// fluid.update(deltaTime);
+		world.step(1 / 60f, 6, 3);
+		fluid2.update(deltaTime);
+		camera.moveTo(cameraChase ? fluid2.getCenterPosition() : cameraOrigin);
+		camera.update(deltaTime, drag);
+		if (drag)
+			drag();
+		// if(!cameraChase)
+		// cameraOrigin.set(fluid2.getCenterPosition());
+	}
+
+	public void saveCurrentState() {
+		FileHandle file = Gdx.files.getFileHandle(
+				"../data/levels/current_state", FileType.Local);
+		try {
+			PrintWriter saver = new PrintWriter(file.file());
+			if (fluid2 != null)
+				saver.println(fluid2.getCenterPosition().x + " "
+						+ fluid2.getCenterPosition().y);
+			saver.close();
+			Logger.logSuccess("Saved current state");
+		} catch (FileNotFoundException e) {
+			e.printStackTrace();
+		}
+	}
+
+	public void loadCurrentState() {
+		UniversalParser parser = new UniversalParser(
+				"../data/levels/current_state");
+		if (!parser.isEOFReached()) {
+			String x = parser.next();
+			String y = parser.next();
+			Vector2 fluidCenter = new Vector2(Float.parseFloat(x), Float.parseFloat(y));
+		}
+	}
+
+	@Override
+	public boolean keyDown(int keycode) {
+		if (keycode == Keys.C) {
+			cameraChase = !cameraChase;
+		}
+		return false;
+	}
+
+	@Override
+	public boolean keyUp(int keycode) {
+		// TODO Auto-generated method stub
+		return false;
+	}
+
+	@Override
+	public boolean keyTyped(char character) {
+		// TODO Auto-generated method stub
+		return false;
+	}
+
+	Vector3 target = new Vector3(0, 0, 0);
+	Vector3 worldPos = new Vector3(0, 0, 0);
+	int tX, tY;
+	boolean drag = false;
+
+	public void drag() {
+		target = new Vector3(tX, tY, 0);
+		camera.get().unproject(target);
+		cameraOrigin.x += -target.x + worldPos.x;
+		cameraOrigin.y += -target.y + worldPos.y;
+	}
+
+	@Override
+	public boolean touchDown(int screenX, int screenY, int pointer, int button) {
+		if (!cameraChase && button == 1) {
+			tX = screenX;
+			tY = screenY;
+			worldPos = new Vector3(tX, tY, 0);
+			camera.get().unproject(worldPos);
+			drag = true;
+		}
+		return false;
+	}
+
+	@Override
+	public boolean touchUp(int screenX, int screenY, int pointer, int button) {
+		drag = false;
+		return false;
+	}
+
+	@Override
+	public boolean touchDragged(int screenX, int screenY, int pointer) {
+		if (drag) {
+			tX = screenX;
+			tY = screenY;
+		}
+		return false;
+	}
+
+	public void render() {
+		if (drag) {
+			ShapeRenderer shapeRenderer = new ShapeRenderer();
+			shapeRenderer.begin(ShapeType.FilledCircle);
+			shapeRenderer.setProjectionMatrix(camera.get().combined);
+			shapeRenderer.setColor(1, 0, 0, 1);
+			shapeRenderer.filledCircle(worldPos.x, worldPos.y, 5);
+			shapeRenderer.end();
+		}
+		fluid2.render();
+	}
+
+	@Override
+	public boolean mouseMoved(int screenX, int screenY) {
+		// TODO Auto-generated method stub
+		return false;
+	}
+
+	@Override
+	public boolean scrolled(int amount) {
+		Globals.zoom_max.set(Globals.zoom_max.get() - 0.1f * amount);
+		return false;
+	}
+}

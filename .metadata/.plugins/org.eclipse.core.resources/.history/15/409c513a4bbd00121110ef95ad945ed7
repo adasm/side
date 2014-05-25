@@ -1,0 +1,476 @@
+package com.softsquare.side;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import com.badlogic.gdx.InputProcessor;
+import com.badlogic.gdx.Input.Keys;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.graphics.glutils.ShapeRenderer.ShapeType;
+import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.math.Vector3;
+import com.badlogic.gdx.physics.box2d.Body;
+import com.badlogic.gdx.physics.box2d.BodyDef;
+import com.badlogic.gdx.physics.box2d.BodyDef.BodyType;
+import com.badlogic.gdx.physics.box2d.joints.DistanceJoint;
+import com.badlogic.gdx.physics.box2d.joints.DistanceJointDef;
+import com.badlogic.gdx.physics.box2d.joints.MouseJoint;
+import com.badlogic.gdx.physics.box2d.joints.MouseJointDef;
+import com.badlogic.gdx.physics.box2d.CircleShape;
+import com.badlogic.gdx.physics.box2d.Fixture;
+import com.badlogic.gdx.physics.box2d.FixtureDef;
+import com.badlogic.gdx.physics.box2d.JointDef.JointType;
+import com.badlogic.gdx.physics.box2d.MassData;
+import com.badlogic.gdx.physics.box2d.QueryCallback;
+import com.badlogic.gdx.physics.box2d.World;
+
+public class Fluid2 implements InputProcessor {
+	private SideGame game;
+	private World world;
+	private Camera camera;
+	private int nParticles = 512;
+	private float totalMass = 10.0f;
+	private float boxWidth = 300.0f;
+	private float boxHeight = 100.0f;
+	
+	private float fluidMinX = -1000.0f;
+	private float fluidMaxX = 1000.0f;
+	private float fluidMinY = -50.0f;
+	private float fluidMaxY = 1000.0f;
+	private final double EPSILON = 0.00000011920928955078125f;
+	public static Integer LIQUID_INT = new Integer(1234598372);
+	
+	private Body[] liquid;
+	private Body grab;
+	
+	private float targetPressure = 2.0f;
+	private float fallX = 0;
+	private float fallY = 150.0f;
+	private float particleRad = 1.00f;
+	private float rad = 5.0f;
+	private float visc = 0.004f;
+	private boolean sleepingAllowed = false;
+	
+	private ArrayList<Integer>[][] hash;
+	private int hashWidth,hashHeight;
+	
+	private float map(float val, float fromMin, float fromMax, float toMin, float toMax) {
+		float mult = (val - fromMin) / (fromMax - fromMin);
+		float res = toMin + mult * (toMax - toMin);
+		return res;
+	}
+	
+	private int hashX(float x) {
+		float f = map(x, fluidMinX, fluidMaxX, 0, hashWidth-.001f);
+		return (int)f;
+	}
+	
+	private int hashY(float y) {
+		float f = map(y,fluidMinY,fluidMaxY,0,hashHeight-.001f);
+		return (int)f;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public Fluid2(SideGame game, World world, Camera camera) {
+		this.game = game;
+		this.world = world;
+		this.camera = camera;
+		InputManager.add(this);
+		
+		hashWidth = 64;
+	    hashHeight = 64;
+        hash = new ArrayList[hashWidth][hashHeight];
+        for (int i=0; i<hashWidth; ++i) {
+        	for (int j=0; j<hashHeight; ++j) {
+        		hash[i][j] = new ArrayList<Integer>();
+        	}
+        }
+       
+        init();
+        
+        BodyDef bodyDef = new BodyDef();
+		grab = world.createBody(bodyDef);
+    }
+	
+	private void hashLocations() {
+		for(int a = 0; a < hashWidth; a++) {
+            for(int b = 0; b < hashHeight; b++){
+            	hash[a][b].clear();
+            }
+        }
+
+        for(int a = 0; a < liquid.length; a++) {
+            int hcell = hashX(liquid[a].getWorldCenter().x);
+            int vcell = hashY(liquid[a].getWorldCenter().y);
+            if(hcell > -1 && hcell < hashWidth && vcell > -1 && vcell < hashHeight)
+                hash[hcell][vcell].add(new Integer(a));
+        }
+	}
+	
+	private void applyLiquidConstraint(float deltaT) {
+		final float idealRad = 50.0f;
+		float multiplier = idealRad / rad;
+		
+		float[] xchange = new float[liquid.length];
+		float[] ychange = new float[liquid.length];
+		Arrays.fill(xchange,0.0f);
+		Arrays.fill(ychange, 0.0f);
+		
+		float[] xs = new float[liquid.length];
+		float[] ys = new float[liquid.length];
+		float[] vxs = new float[liquid.length];
+		float[] vys = new float[liquid.length];
+		for (int i=0; i<liquid.length; ++i) {
+			xs[i] = multiplier*liquid[i].getWorldCenter().x;
+			ys[i] = multiplier*liquid[i].getWorldCenter().y;
+			vxs[i] = multiplier*liquid[i].getLinearVelocity().x;
+			vys[i] = multiplier*liquid[i].getLinearVelocity().y;
+		}
+		
+		for(int i = 0; i < liquid.length; i++) {
+			ArrayList<Integer> neighbors = new ArrayList<Integer>();
+	        int hcell = hashX(liquid[i].getWorldCenter().x);
+	        int vcell = hashY(liquid[i].getWorldCenter().y);
+	        for(int nx = -1; nx < 2; nx++) {
+	            for(int ny = -1; ny < 2; ny++) {
+	                int xc = hcell + nx;
+	                int yc = vcell + ny;
+	                if(xc > -1 && xc < hashWidth && yc > -1 && yc < hashHeight && hash[xc][yc].size() > 0) {
+	                    for(int a = 0; a < hash[xc][yc].size(); a++) {
+	                        Integer ne = (Integer)hash[xc][yc].get(a);
+	                        if(ne != null && ne.intValue() != i) neighbors.add(ne);
+	                    }
+	                }
+	            }
+	        }
+	        
+            float[] vlen = new float[neighbors.size()];
+            float p = 0.0f;
+            float pnear = 0.0f;
+            for(int a = 0; a < neighbors.size(); a++) {
+                Integer n = (Integer)neighbors.get(a);
+                int j = n.intValue();
+                float vx = xs[j]-xs[i];
+                float vy = ys[j]-ys[i];
+            
+                if(vx > -idealRad && vx < idealRad && vy > -idealRad && vy < idealRad) {
+                    float vlensqr = (vx * vx + vy * vy);
+                    if(vlensqr < idealRad*idealRad) {
+                    	vlen[a] = (float)Math.sqrt(vlensqr);
+                    	if (vlen[a] < EPSILON) vlen[a] = idealRad-.01f;
+                        float oneminusq = 1.0f-(vlen[a] / idealRad);
+                        p = (p + oneminusq*oneminusq);
+                        pnear = (pnear + oneminusq*oneminusq*oneminusq);
+                    } else {
+                    	vlen[a] = Float.MAX_VALUE;
+                    }
+                }
+            }
+            
+            float pressure = (p - targetPressure) / 2.0f;
+            float presnear = pnear / 2.0f;
+            float changex = 0.0F;
+            float changey = 0.0F;
+            for(int a = 0; a < neighbors.size(); a++) {
+                Integer n = (Integer)neighbors.get(a);
+                int j = n.intValue();
+                float vx = xs[j]-xs[i];
+                float vy = ys[j]-ys[i];
+                if(vx > -idealRad && vx < idealRad && vy > -idealRad && vy < idealRad) {
+                    if(vlen[a] < idealRad) {
+                        float q = vlen[a] / idealRad;
+                        float oneminusq = 1.0f-q;
+                        float factor = oneminusq * (pressure + presnear * oneminusq) / (2.0F*vlen[a]);
+                        float dx = vx * factor;
+                        float dy = vy * factor;
+                        float relvx = vxs[j] - vxs[i];
+                        float relvy = vys[j] - vys[i];
+                        factor = visc * oneminusq * deltaT;
+                        dx -= relvx * factor;
+                        dy -= relvy * factor;
+                        xchange[j] += dx;
+                        ychange[j] += dy;
+                        changex -= dx;
+                        changey -= dy;
+                    }
+                }
+            }
+	        xchange[i] += changex;
+	        ychange[i] += changey;
+        }
+		
+		final float speedup = 1.0f;
+		for (int i=0; i<liquid.length; ++i) {
+			Vector2 o = liquid[i].getPosition();
+			Vector2 v = liquid[i].getLinearVelocity();
+			liquid[i].setTransform(o.x + xchange[i] / multiplier, o.y + ychange[i] / multiplier, 0);
+			liquid[i].setLinearVelocity(v.x + speedup * xchange[i] / (multiplier*deltaT), v.y + speedup * ychange[i] / (multiplier*deltaT));
+		}
+	}
+	
+	public float randomFloat(float a, float b) {
+		return (float) (a + Math.random()*(b-a));
+	}
+			
+	public void init() {
+		liquid = new Body[nParticles];
+		float massPerParticle = totalMass / nParticles;
+		CircleShape pd = new CircleShape();
+		FixtureDef fd = new FixtureDef();
+		fd.shape = pd;
+		fd.density = 1f;
+		fd.filter.groupIndex = -10;
+		pd.setRadius(particleRad);
+		fd.restitution = 0.9f;
+		fd.friction = 0;
+		float cx = fallX;
+		float cy = fallY;
+		for (int i=0; i<nParticles; ++i) {
+			BodyDef bd = new BodyDef();
+			bd.position.set(new Vector2( randomFloat(cx-boxWidth*.5f ,cx+boxWidth*.5f), randomFloat(cy-boxHeight*.5f,cy+boxHeight*.5f)));
+			bd.fixedRotation = true;
+			bd.type = BodyType.DynamicBody;
+			Body b = world.createBody(bd);
+			
+			b.createFixture(fd).setUserData(LIQUID_INT);
+			
+			MassData md = new MassData();
+			md.mass = massPerParticle;
+			md.I = 1.0f;
+			b.setMassData(md);
+			b.setSleepingAllowed(sleepingAllowed);
+			liquid[i] = b;
+		}
+
+	}
+	
+	public void update(float deltaTime) {
+		float hz = 120;
+		float dt = 1.0f/hz;
+		hashLocations();
+		applyLiquidConstraint(dt*1.0f);
+		dampenLiquid();
+		checkBounds();		
+		computeCenter();
+		addForce();
+		
+		game.addStats("");
+		game.addStats(" Fluid (" + hz + "Hz)");
+		game.addStats("   nParticles " + nParticles);
+		game.addStats("   totalMass " + totalMass);
+		game.addStats("   targetPressure " + targetPressure);
+		game.addStats("   particleRad " + particleRad);
+		game.addStats("   idealRad " + rad);
+		game.addStats("   viscosity " + visc);
+		game.addStats("");
+	}
+	
+	public void render() {
+		ShapeRenderer shapeRenderer = new ShapeRenderer();
+		shapeRenderer.begin(ShapeType.FilledCircle);
+		shapeRenderer.setProjectionMatrix(camera.get().combined);
+		shapeRenderer.setColor(1, 0, 1, 0.1f);
+		shapeRenderer.filledCircle(center.x, center.y, 3);
+		shapeRenderer.end();
+	}
+	
+	private Vector2 center = new Vector2(0, 0);
+	
+	public void computeCenter() {
+		float x = liquid[0].getWorldCenter().x;
+		float y = liquid[0].getWorldCenter().y;
+		float n = 0.0f;
+		for(int i = 1; i < liquid.length; i++) {
+			if(liquid[i].isActive() == false)continue;
+			x += liquid[i].getWorldCenter().x;
+			y += liquid[i].getWorldCenter().y;
+			n++;
+		}
+		center.set(x/n, y/n);
+	}
+	
+	public Vector2 getCenterPosition() {
+		return center;
+	}
+	
+	public void addForce() {
+		Vector2 f = new Vector2(0,0);
+		Vector2 o = new Vector2(0,0);
+		float c = 1.0f;
+		for(int i = 1; i < liquid.length; i++) {
+			if(liquid[i].isActive()) {
+				f.x = center.x - liquid[i].getWorldCenter().x;
+				f.y = center.y - liquid[i].getWorldCenter().y;
+				if(f.len() > 2) {
+					c = (float) Math.exp(0.01f*f.len());
+					liquid[i].applyForceToCenter(f.nor().mul(c));
+				}
+			}
+		}
+		if(externalForce.len() > 0.000001f) {
+			o.x = externalForce.x;
+			o.y = externalForce.y;
+			o.nor();
+			o.x = 150*o.x + center.x;
+			o.y = 150*o.y + center.y;
+			for(int i = 1; i < liquid.length; i++) {
+				if(liquid[i].isActive()) {
+					f.x = o.x - liquid[i].getWorldCenter().x;
+					f.y = o.y - liquid[i].getWorldCenter().y;
+					c = (float) Math.exp(-0.1f*f.len()) * 500;
+					liquid[i].applyLinearImpulse(f.x * c, f.y *c, liquid[i].getWorldCenter().x, liquid[i].getWorldCenter().y);
+					//liquid[i].getLinearVelocity().x += f.x * c;
+					//liquid[i].getLinearVelocity().y += f.y * c;
+				}
+			}
+			externalForce.set(0, 0);
+		}
+	}
+	
+	public void createLiquidDrop(int i, float x, float y) {
+		float massPerParticle = totalMass / nParticles;
+		CircleShape pd = new CircleShape();
+		FixtureDef fd = new FixtureDef();
+		fd.shape = pd;
+		fd.density = 1.0f;
+		fd.filter.groupIndex = -10;
+		pd.setRadius(particleRad);
+		fd.restitution = 0.4f;
+		fd.friction = 0.0f;
+		float cx = x + randomFloat(-particleRad*20,particleRad*20);
+		float cy = y + randomFloat(-particleRad*20,particleRad*20);
+		BodyDef bd = new BodyDef();
+		bd.position.set(new Vector2( cx, cy ));
+		bd.fixedRotation = true;
+		bd.type = BodyType.DynamicBody;
+		Body b = world.createBody(bd);
+		b.createFixture(fd).setUserData(LIQUID_INT);
+		MassData md = new MassData();
+		md.mass = massPerParticle;
+		md.I = 1.0f;
+		b.setMassData(md);
+		b.setSleepingAllowed(sleepingAllowed);
+		liquid[i] = b;
+	}
+	
+	private void checkBounds() {
+		for (int i=0; i<liquid.length; ++i) {
+			if (liquid[i].getWorldCenter().y < -10.0f) {
+				world.destroyBody(liquid[i]);
+				createLiquidDrop(i, fallX, fallY);
+			}
+		}
+	}
+	
+	private void dampenLiquid() {
+		for (int i=0; i<liquid.length; ++i) {
+			Body b = liquid[i];
+			b.setLinearVelocity(b.getLinearVelocity().mul(0.995f));
+		}
+	}
+	
+	private Vector2 externalForce = new Vector2(0,0);
+	
+	int li = 0;
+	
+	boolean drag = false;
+	
+	Vector2 target = new Vector2(0,0);
+	ArrayList<Body> bodies = new ArrayList<Body>();
+	ArrayList<MouseJoint> joints = new ArrayList<MouseJoint>();
+	QueryCallback callback = new QueryCallback() {
+		@Override
+		public boolean reportFixture(Fixture fixture) {
+			if(fixture.getUserData() != null && fixture.getUserData().equals(LIQUID_INT) && fixture.getBody().getPosition().dst(target) < 128) {
+				bodies.add(fixture.getBody());
+				return true;
+			} else return true;
+		}
+	};
+	
+	@Override
+	public boolean touchDown(int screenX, int screenY, int pointer, int button) {
+		Vector3 w = new Vector3(screenX, screenY, 0);
+		camera.get().unproject(w);
+		target.x = w.x;
+		target.y = w.y;
+		if(button == 0) {
+			joints.clear();
+			bodies.clear();
+			world.QueryAABB(callback, target.x - 128, target.y - 128, target.x + 128, target.y + 128);
+			grab.setTransform(target.x, target.y, 0);
+			for(Body b : bodies) {
+				MouseJointDef def = new MouseJointDef();
+				def.bodyA = grab;
+				def.bodyB = b;
+				def.collideConnected = false;
+				def.dampingRatio = 1;
+				def.frequencyHz = 60.0f;
+				def.target.set(grab.getPosition().x, grab.getPosition().y);
+				//def.length = 0;
+				joints.add((MouseJoint)world.createJoint(def));
+				b.setAwake(true);
+			}
+			drag = true;
+		} 
+		return false; 
+	}
+	
+	@Override
+	public boolean touchDragged(int screenX, int screenY, int pointer) {
+		if(drag) {
+			Vector3 target = new Vector3(screenX, screenY, 0);
+			camera.get().unproject(target);
+			grab.setTransform(target.x, target.y, 0);
+			for(MouseJoint j : joints) {
+				//j.setTarget(new Vector2(target.x, target.y));
+			}
+			//externalForce.set((target.x - center.x) * 500, (target.y - center.y) * 500);
+		} 
+		return false; 
+	}
+	
+	@Override
+	public boolean touchUp(int screenX, int screenY, int pointer, int button) {
+		for(MouseJoint j : joints) {
+			world.destroyJoint(j);
+		}
+		joints.clear();
+		drag = false;
+		return false; 
+	}
+
+	@Override
+	public boolean keyDown(int keycode) {
+		switch (keycode) {
+			case Keys.LEFT_BRACKET:
+				world.setGravity(world.getGravity().mul(0.75f));
+				break;
+			case Keys.RIGHT_BRACKET:
+				world.setGravity(world.getGravity().mul(1.25f));
+				break;
+			case Keys.PLUS:
+				targetPressure += 0.1f;
+				break;
+			case Keys.MINUS:
+				targetPressure -= 0.1f;
+				break;
+			case Keys.Q:
+				visc -= 0.001f;
+				break;
+			case Keys.W:
+				visc += 0.001f;
+				break;
+		}
+		return false; 
+	}
+	@Override
+	public boolean keyUp(int keycode) { return false; }
+	@Override
+	public boolean keyTyped(char character) { return false; }
+	
+	
+	@Override
+	public boolean mouseMoved(int screenX, int screenY) { return false; }
+	@Override
+	public boolean scrolled(int amount) { return false; }
+}

@@ -1,0 +1,70 @@
+package com.softsquare.side;
+
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Screen;
+import com.badlogic.gdx.graphics.GL10;
+import com.badlogic.gdx.physics.box2d.Box2DDebugRenderer;
+
+public class LevelScreen implements Screen {
+	private SideGame game;
+	private Camera camera;
+	public Level level;
+	private int levelId;
+	private Box2DDebugRenderer renderer;
+	private boolean render = true, started = false;
+
+	public LevelScreen(SideGame game, int id) {
+		this.game = game;
+		this.levelId = id;
+	}
+
+	@Override
+	public void show() {
+		if (!started) {
+			camera = new Camera(game);
+			level = new Level(game, levelId, camera);
+			level.generate();
+			renderer = new Box2DDebugRenderer();
+			started = true;
+			Logger.logSuccess("Loaded level" + level);
+		}
+	}
+
+	@Override
+	public void render(float deltaTime) {
+		game.begin();
+		Gdx.gl.glClearColor(0, 0, 0, 1);
+		Gdx.gl.glClear(GL10.GL_COLOR_BUFFER_BIT);
+		level.update(deltaTime);
+		// game.addStats("c " + level.fluid.getCenterPosition().toString());
+		game.stage.act(deltaTime);
+		renderer.render(level.world, camera.get().combined);
+		level.render();
+		game.end();
+
+	}
+
+	@Override
+	public void resize(int width, int height) {
+	}
+
+	@Override
+	public void hide() {
+	}
+
+	@Override
+	public void pause() {
+		level.terrain.saveCurrentTerrain();
+	}
+
+	@Override
+	public void resume() {
+		level.terrain.loadCurrentTerrain();
+	}
+
+	@Override
+	public void dispose() {
+		level.world.dispose();
+		renderer.dispose();
+	}
+}

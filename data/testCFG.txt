@@ -1,0 +1,13 @@
+temp = "testowy string"
+temp1 = 0.0
+temp2=-0.1
+temp3= 1
+
+abc = 120
+asd = "1323213213"
+float = -213.0321
+abcc=310
+a="dasda sada"
+f=true
+g =false
+eui=-213.00

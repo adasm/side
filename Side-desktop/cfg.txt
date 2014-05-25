@@ -1,0 +1,58 @@
+
+group terrain
+sharpness 0.1
+smooth 3
+smoothKernel 3
+step 3.0
+size 4096
+
+group fluid
+gravityScale 1.0
+hashWidth 32
+drawDragLine false
+particleRadius 1.0
+restitution 0.9
+minY 0.0
+alphaBlendingEnabled true
+mass 10.0
+hashHeight 32
+sleepingAllowed false
+forceToCenter 10.0
+optimizedParticleRadius 0.9
+drawMassCenter false
+alphaStart 0.10000000149011612
+randomOnRespawn true
+dragRadius 96.0
+optimizedRendering false
+targetPressure 2.0
+respawnAtCenter true
+friction 0.1
+alphaEnd 0.800000011920929
+expRadius false
+computeFluidMinMax true
+viscosity 0.004
+fallHeight 100.0
+respawn true
+idealRad 5.0
+dragCoef 100.0
+stepHz 120
+optimizedParticleStep 8
+numParticles 200
+fallWidth 300.0
+
+group physics
+time 2.0
+gravity 9.82
+
+group camera
+zoomDynamic true
+zoomStart 0.1
+smooth true
+zoomCoef 0.5
+speed 5.0
+zoomMin 2.0
+zoom_static 2.0
+zoomMax 5.90500008791685
+
+group main
+hideStats false
